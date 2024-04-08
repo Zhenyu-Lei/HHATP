@@ -1,0 +1,7 @@
+/data/
+/argoverse/
+/checkpoints/
+/datasets_mini/
+*.pyc
+/.vscode/
+*.pth
