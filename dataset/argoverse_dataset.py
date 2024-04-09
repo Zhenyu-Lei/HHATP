@@ -69,6 +69,7 @@ class Argoverse_Dataset(Dataset):
         agent_indices = []
         lane_list = []
         meta_info = []
+        drop_list=[]
         for j, polyline_span in enumerate(polyline_spans):
             tensor = torch.tensor(matrix[polyline_span])
 
@@ -77,6 +78,7 @@ class Argoverse_Dataset(Dataset):
             is_agent_polyline = j < map_start_polyline_idx
 
             if is_agent_polyline and (len(tensor) == 1):
+                drop_list.append(True)
                 continue
 
             if is_agent_polyline:
@@ -85,6 +87,9 @@ class Argoverse_Dataset(Dataset):
             # === Static Agent Drop ===
             if (is_agent_polyline) and (j != 0) and (displacement < 1.0) and (self.static_agent_drop):
                 drop = random.random() < 0.1
+            
+            if is_agent_polyline:
+                drop_list.append(drop)
 
             if is_agent_polyline and not drop:
                 tensor[:, :4] *= random_scale
@@ -143,6 +148,7 @@ class Argoverse_Dataset(Dataset):
                        "cent_x": mapping["cent_x"],
                        "cent_y": mapping["cent_y"],
                        "angle": mapping["angle"],
+                       "attention_map": mapping["attention_map"][~np.array(drop_list)],
                        "meta_info": meta_info}
 
         return [new_mapping]

@@ -232,6 +232,18 @@ def merge_tensors(tensors, device, hidden_size):
             res[i][:tensor.shape[0]] = tensor
     return res, lengths
 
+def merge_attention_tensors(tensors, device):
+    lengths = []
+    heights = []
+    for tensor in tensors:
+        lengths.append(tensor.shape[0] if tensor is not None else 0)
+        heights.append(tensor.shape[1] if tensor is not None else 0)
+    res = torch.zeros([len(tensors), max(lengths), max(heights)], device=device)
+    for i, tensor in enumerate(tensors):
+        if tensor is not None:
+            res[i][:tensor.shape[0],:tensor.shape[1]] = tensor
+    return res, lengths
+
 
 def rotate(x, y, angle):
     res_x = x * math.cos(angle) - y * math.sin(angle)

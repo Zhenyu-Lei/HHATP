@@ -9,7 +9,7 @@ import torch.nn.functional as F
 # encoder modules
 from model.modules import Trajectory_Loss, Trajectory_Decoder, Sub_Graph, Interaction_Module, Interaction_Module2
 
-from utils.utils import merge_tensors, get_masks
+from utils.utils import merge_tensors, get_masks, merge_attention_tensors
 from utils.utils import to_origin_coordinate, batch_init
 
 
@@ -60,6 +60,7 @@ class ADAPT(nn.Module):
                           for i in range(batch_size)]
         meta_info = [mapping[i]["meta_info"] for i in range(batch_size)]
         considers = [mapping[i]["consider"] for i in range(batch_size)]
+        attention_map = [mapping[i]["attention_map"] for i in range(batch_size)]
 
         for i in range(batch_size):
             for j in range(len(agent_data[i])):
@@ -77,7 +78,7 @@ class ADAPT(nn.Module):
         # agent_features.shape = (N, M, D)
         # lane_features.shape = (N, L, D)
         agent_features, lane_features = self.encode_polylines(
-                agent_data, lane_data)
+                agent_data, lane_data, attention_map)
 
         # predictions.shape = (N, M, 6, 30, 2)
         predictions, logits = self.trajectory_decoder(
@@ -96,6 +97,7 @@ class ADAPT(nn.Module):
             logit = logits[scene_index]
             label = labels[scene_index].permute(1, 0, 2).float()
             valid = label_is_valid[scene_index].permute(1, 0).float()
+            meta_infomation=meta_info[scene_index]
 
             if not self.multi_agent:
                 consider = torch.tensor(
@@ -114,6 +116,7 @@ class ADAPT(nn.Module):
             logit = logit[consider]
             label = label[consider]
             valid = valid[consider].unsqueeze(dim=-1)
+            meta_infomation=meta_infomation[consider]
 
             assert torch.sum(label == -666) == 0
 
@@ -129,7 +132,7 @@ class ADAPT(nn.Module):
 
             if not validate:
                 loss_ = self.trajectory_loss(
-                        prediction, log_prob, valid, label)
+                        prediction, log_prob, valid, label, meta_infomation)
 
                 losses[scene_index] = loss_*pred_num
 
@@ -149,7 +152,7 @@ class ADAPT(nn.Module):
 
             return outputs, metric_probs, multi_outputs
 
-    def encode_polylines(self, agent_data, lane_data):
+    def encode_polylines(self, agent_data, lane_data, attention_map):
         batch_size = len(agent_data)
 
         # === === Polyline Subgraph Part === ===
@@ -174,11 +177,12 @@ class ADAPT(nn.Module):
         # agent_states.shape = (batch_size, max_agent_num, hidden_size)
         agent_states, agent_lengths = merge_tensors(
             agent_polylines, self.device, self.hidden_size)
+        attention_map, _=merge_attention_tensors(attention_map,self.device)
 
         # === === === === ===
 
         masks, _ = get_masks(agent_lengths, lane_lengths, self.device)
         # agent_states(N,M,D), lane_states(N,L,D)
-        agent_states, lane_states = self.interaction_module(agent_states, lane_states, masks)
+        agent_states, lane_states = self.interaction_module(agent_states, lane_states, masks, attention_map)
 
         return agent_states, lane_states

@@ -189,7 +189,8 @@ def normalize_scene(mapping, id, angle):
                    "origin_labels": new_origin_labels,
                    "cent_x": mapping["cent_x"] + ref_point[0],
                    "cent_y": mapping["cent_y"] + ref_point[1],
-                   "angle": mapping["angle"] + angle}
+                   "angle": mapping["angle"] + angle,
+                   "attention_map": mapping["attention_map"]}
 
     return new_mapping
 

@@ -97,7 +97,7 @@ VECTOR_Y = 3
 EPSILON = 1e-5
 
 
-def get_sub_map(args, vectors=[], polyline_spans=[], mapping=None):
+def get_sub_map(args, vectors=[], polyline_spans=[], mapping=None, agent_available=[]):
     assert isinstance(am, ArgoverseMap)
 
     x = mapping["cent_x"]
@@ -107,8 +107,10 @@ def get_sub_map(args, vectors=[], polyline_spans=[], mapping=None):
     lane_ids = []
     pos_matrix = mapping["pos_matrix"]
     agent_num = pos_matrix.shape[1]
+    agent_surround_lane=[]
 
     for agent_id in range(agent_num):
+        lane_ids_per_agent=[]
         for t_id in range(20):
             pos_x = pos_matrix[t_id, agent_id, 0]
             pos_y = pos_matrix[t_id, agent_id, 1]
@@ -119,6 +121,9 @@ def get_sub_map(args, vectors=[], polyline_spans=[], mapping=None):
             lane_ids_temp = am.get_lane_ids_in_xy_bbox(
                 temp_x, temp_y, city_name, query_search_range_manhattan=args.max_distance)
             lane_ids.extend(lane_ids_temp)
+            lane_ids_per_agent.extend(lane_ids_temp)
+        if agent_available[agent_id]!=0:
+            agent_surround_lane.append(list(set(lane_ids_per_agent)))
 
     lane_ids = list(set(lane_ids))
     local_lane_centerlines = [am.get_lane_segment_centerline(
@@ -137,6 +142,8 @@ def get_sub_map(args, vectors=[], polyline_spans=[], mapping=None):
     for polygon_idx, lane_idx in enumerate(lane_ids):
         lane_idx_2_polygon_idx[lane_idx] = polygon_idx
 
+    attention_map = torch.zeros(mapping['map_start_polyline_idx'], len(lane_ids))  # 创建全为0的张量,表示agent和map的attention关系
+
     for index_polygon, polygon in enumerate(polygons):
         assert 2 <= len(polygon) <= 10
 
@@ -144,6 +151,10 @@ def get_sub_map(args, vectors=[], polyline_spans=[], mapping=None):
 
         assert len(lane_ids) == len(polygons)
         lane_id = lane_ids[index_polygon]
+        # 更新attention map
+        for agent_id, lane_list in enumerate(agent_surround_lane):
+            if lane_id in lane_list:
+                attention_map[agent_id,index_polygon]=1
         lane_segment = am.city_lane_centerlines_dict[city_name][lane_id]
         assert len(polygon) >= 2
         for i, point in enumerate(polygon):
@@ -174,7 +185,7 @@ def get_sub_map(args, vectors=[], polyline_spans=[], mapping=None):
         if start < end:
             polyline_spans.append([start, end])
 
-    return (vectors, polyline_spans)
+    return (vectors, polyline_spans, attention_map)
 
 
 def get_labels(args, id2info, mapping):
@@ -204,6 +215,7 @@ def preprocess(args, id2info, mapping):
     polyline_spans = []
     keys = get_key_list(id2info)
     vectors = []
+    agent_available=[]
     two_seconds = mapping['two_seconds']
     for id in keys:
         info = id2info[id]
@@ -222,15 +234,17 @@ def preprocess(args, id2info, mapping):
         end = len(vectors)
         if end - start == 0:
             assert id != 'AV' and id != 'AGENT'
+            agent_available.append(0)
         else:
             polyline_spans.append([start, end])
+            agent_available.append(1)
 
     assert len(vectors) <= max_vector_num
 
     mapping['map_start_polyline_idx'] = len(polyline_spans)
 
-    vectors, polyline_spans = get_sub_map(args, vectors=vectors,
-                                          polyline_spans=polyline_spans, mapping=mapping)
+    vectors, polyline_spans, attention_map = get_sub_map(args, vectors=vectors,
+                                          polyline_spans=polyline_spans, mapping=mapping,agent_available=agent_available)
 
     matrix = np.array(vectors)
     labels, label_is_valid = get_labels(args, id2info, mapping)
@@ -240,6 +254,7 @@ def preprocess(args, id2info, mapping):
         labels=labels,
         label_is_valid=label_is_valid,
         polyline_spans=[slice(each[0], each[1]) for each in polyline_spans],
+        attention_map=attention_map
     ))
 
     return mapping

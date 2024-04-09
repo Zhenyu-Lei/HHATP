@@ -22,7 +22,7 @@ class Trajectory_Loss(nn.Module):
     def __init__(self, args):
         super(Trajectory_Loss, self).__init__()
 
-    def forward(self, prediction, log_prob, valid, label):
+    def forward(self, prediction, log_prob, valid, label, meta_info):
         device = prediction.device
         loss_ = 0
 
@@ -45,6 +45,25 @@ class Trajectory_Loss(nn.Module):
 
         # === L_end ===
         loss_ += F.smooth_l1_loss(prediction[torch.arange(M, device=device), best_ids, -1], label[:, -1], reduction="mean")
+        # === === ===
+
+        # === L_smooth ===
+        pred=prediction[torch.arange(M, device=device), best_ids]
+        pred = torch.cat((meta_info[:, [1, 2]].unsqueeze(1), pred), dim=1)  # 在第3个维度上进行连接
+        vector=pred[:,1:,:]-pred[:,:-1,:]
+        addspeed=vector[:,1:,:]-vector[:,:-1,:]
+        label=torch.cat((meta_info[:, [1, 2]].unsqueeze(1), label), dim=1)
+        vector_label=vector=label[:,1:,:]-label[:,:-1,:]
+        addspeed_label=vector_label[:,1:,:]-vector_label[:,:-1,:]
+        loss_+=F.smooth_l1_loss(addspeed, addspeed_label, reduction="none").sum()/(valid.sum()*2)
+        # length_vector = torch.norm(vector, dim=2)  # 计算速度向量的长度
+        # length_addspeed = torch.norm(addspeed, dim=2)  # 计算加速度向量的长度
+
+        # diff = length_addspeed - length_vector[:,:-1]  # 计算加速度向量和速度向量长度之间的差异
+
+        # mask = diff<0  # 创建掩码，加速度向量长度小于速度向量长度的对数
+        # diff[mask] = 0  # 如果加速度向量长度小于速度向量长度的对数，则将差异设置为0
+        # loss_ += torch.sum(diff ** 2).item()/(valid.sum()*2)  # 计算损失
         # === === ===
 
         return loss_
@@ -346,21 +365,22 @@ class Interaction_Module2(nn.Module):
 
         self.L2A = nn.ModuleList([TransformerDecoder(hidden_size) for _ in range(depth)])
         self.A2L = nn.ModuleList([TransformerDecoder(hidden_size) for _ in range(depth)])
-        # self.AA = Attention_Block(hidden_size)
+        self.AA = Attention_Block(hidden_size)
 
 
-    def forward(self, agent_features, lane_features, masks):
+    def forward(self, agent_features, lane_features, masks, attention_map):
 
+        # === Agent to Lane ===
         for layer_index in range(self.depth):
             # === Lane to Agent ===
-            lane_features = lane_features + self.L2A[layer_index](x_padding=lane_features, x_mask=masks[-2], y_padding=agent_features, y_mask=masks[-1])
+            lane_features = lane_features + self.L2A[layer_index](x_padding=lane_features, x_mask=masks[-2], y_padding=agent_features, y_mask=masks[-1].to(torch.int)&attention_map.transpose(-1, -2).to(torch.int))
             # === ==== ===
 
-            # === Agent to Lane ===
-            agent_features = agent_features + self.A2L[layer_index](x_padding=agent_features, x_mask=masks[-4], y_padding=lane_features, y_mask=masks[-3])
-            # === ==== ===
-        
-        # agent_features = self.AA(agent_features, attn_mask=masks[-4])
+            if layer_index!=self.depth-1:
+                agent_features = agent_features + self.A2L[layer_index](x_padding=agent_features, x_mask=masks[-4], y_padding=lane_features, y_mask=masks[-3].to(torch.int)&attention_map.to(torch.int))
+            else:
+                agent_features = agent_features + self.A2L[layer_index](x_padding=agent_features, x_mask=masks[-4], y_padding=lane_features, y_mask=masks[-3])
+        # === ==== ===
 
         return agent_features, lane_features
 
