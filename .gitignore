@@ -5,3 +5,4 @@
 *.pyc
 /.vscode/
 *.pth
+/exp_pic/

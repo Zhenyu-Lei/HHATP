@@ -9,6 +9,9 @@ import pickle
 from tqdm import tqdm
 from datetime import datetime
 from argoverse.evaluation import eval_forecasting
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import os
 
 import torch.backends.cudnn as cudnn
 
@@ -278,3 +281,48 @@ def fix_seed(seed):
     torch.cuda.manual_seed_all(seed)
     cudnn.deterministic = True
     cudnn.benchmark = True
+
+def draw_attention_maps(attention_map, save_dir):
+    """
+    绘制注意力图并保存为图片
+
+    参数:
+        attention_map (list): 包含M个数据的注意力图，每个数据是形状为(N, K)的张量
+        save_dir (str): 保存图片的目录路径
+    """
+    # 创建保存图片的目录
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    M = len(attention_map)  # 数据个数
+
+    # 定义浅蓝和浅红的颜色
+    light_blue = mcolors.to_rgb('lightblue')
+    light_red = mcolors.to_rgb('lightcoral')
+
+    for i in range(M):
+        # 获取当前数据的形状
+        N, K = attention_map[i].size()
+
+        # 创建一个新的图像
+        plt.figure()
+
+        # 绘制浅蓝和浅红的矩形
+        for row in range(N):
+            for col in range(K):
+                if attention_map[i][row][col] == 1:
+                    plt.fill([col, col+1, col+1, col], [row, row, row+1, row+1], color=light_red)
+                else:
+                    plt.fill([col, col+1, col+1, col], [row, row, row+1, row+1], color=light_blue)
+
+        # 设置坐标轴范围和标题
+        plt.xlim(0, K)
+        plt.ylim(0, N)
+        plt.title(f'Attention Map {i+1}')
+
+        # 保存图片
+        save_path = os.path.join(save_dir, f'attention_map_{i+1}.png')
+        plt.savefig(save_path)
+
+        # 关闭图像
+        plt.close()

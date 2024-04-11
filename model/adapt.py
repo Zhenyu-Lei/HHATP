@@ -7,10 +7,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # encoder modules
-from model.modules import Trajectory_Loss, Trajectory_Decoder, Sub_Graph, Interaction_Module, Interaction_Module2
+from model.modules import Trajectory_Loss, Trajectory_Decoder, Sub_Graph, Interaction_Module, Interaction_Module2, Sub_Graph_Agent, Sub_Graph_Lane
 
 from utils.utils import merge_tensors, get_masks, merge_attention_tensors
-from utils.utils import to_origin_coordinate, batch_init
+from utils.utils import to_origin_coordinate, batch_init, draw_attention_maps
 
 
 class ADAPT(nn.Module):
@@ -23,8 +23,10 @@ class ADAPT(nn.Module):
         self.multi_agent = args.multi_agent
         self.validate = None
 
-        self.lane_subgraph = Sub_Graph(self.hidden_size)
-        self.agent_subgraph = Sub_Graph(self.hidden_size)
+        # self.lane_subgraph = Sub_Graph(self.hidden_size)
+        # self.agent_subgraph = Sub_Graph(self.hidden_size)
+        self.lane_subgraph = Sub_Graph_Lane(self.hidden_size)
+        self.agent_subgraph = Sub_Graph_Agent(self.hidden_size)
 
         # self.interaction_module = Interaction_Module(
         #     self.hidden_size, depth=args.layer_num)
@@ -75,6 +77,7 @@ class ADAPT(nn.Module):
             considers[i] = considers[i].to(self.device)
 
         start = time.time()
+        # draw_attention_maps(attention_map,"exp_pic")
         # agent_features.shape = (N, M, D)
         # lane_features.shape = (N, L, D)
         agent_features, lane_features = self.encode_polylines(

@@ -56,14 +56,6 @@ class Trajectory_Loss(nn.Module):
         vector_label=vector=label[:,1:,:]-label[:,:-1,:]
         addspeed_label=vector_label[:,1:,:]-vector_label[:,:-1,:]
         loss_+=F.smooth_l1_loss(addspeed, addspeed_label, reduction="none").sum()/(valid.sum()*2)
-        # length_vector = torch.norm(vector, dim=2)  # 计算速度向量的长度
-        # length_addspeed = torch.norm(addspeed, dim=2)  # 计算加速度向量的长度
-
-        # diff = length_addspeed - length_vector[:,:-1]  # 计算加速度向量和速度向量长度之间的差异
-
-        # mask = diff<0  # 创建掩码，加速度向量长度小于速度向量长度的对数
-        # diff[mask] = 0  # 如果加速度向量长度小于速度向量长度的对数，则将差异设置为0
-        # loss_ += torch.sum(diff ** 2).item()/(valid.sum()*2)  # 计算损失
         # === === ===
 
         return loss_
@@ -249,6 +241,111 @@ class Sub_Graph(nn.Module):
 
         return hidden_states
 
+class Sub_Graph_Lane(nn.Module):
+    def __init__(self, hidden_size, depth=3):
+        super(Sub_Graph_Lane, self).__init__()
+        """
+            This Sub_Graph corresponds to Polyline Subgraph of VectorNet
+        """
+
+        self.hidden_size = hidden_size
+        # 通过3层MLP编码子图（是否可以用RNN进行编码）
+        self.layers = nn.ModuleList(
+            [MLP(hidden_size, hidden_size//2) for _ in range(depth)])
+
+    def forward(self, lane_list):
+        batch_size = len(lane_list)
+        device = lane_list[0].device
+        # 取最长长度，制作成规范化M*N*128的表
+        hidden_states, lengths = merge_tensors(
+            lane_list, device, self.hidden_size)
+        max_vector_num = hidden_states.shape[1]
+
+        attention_mask = torch.zeros(
+            [batch_size, max_vector_num, self.hidden_size//2], device=device)
+        attention_mask_final = torch.zeros(
+            [batch_size, max_vector_num, self.hidden_size], device=device)
+
+        for i in range(batch_size):
+            assert lengths[i] > 0
+            attention_mask[i][lengths[i]:max_vector_num].fill_(-10000.0)
+            attention_mask_final[i][lengths[i]:max_vector_num].fill_(-10000.0)
+
+        zeros = torch.zeros([self.hidden_size//2], device=device)
+
+        for layer_index, layer in enumerate(self.layers):
+            new_hidden_states = torch.zeros(
+                [batch_size, max_vector_num, self.hidden_size], device=device)
+
+            # encoded_hidden_states.shape = (lane_num, max_vector_num, hidden_size)
+            #                            or (agent_num, max_vector_num, hidden_size)
+            encoded_hidden_states = layer(hidden_states)
+
+            # max_hidden.shape = (lane_num, hidden_size)
+            #                 or (agent_num, hidden_size)
+            max_hidden, _ = torch.max(
+                encoded_hidden_states + attention_mask, dim=1)
+
+            max_hidden = torch.max(
+                max_hidden, zeros.unsqueeze(0).expand_as(max_hidden))
+            
+            # 两个hidden_state合并为一个128维的向量
+            new_hidden_states = torch.cat([encoded_hidden_states, max_hidden.unsqueeze(
+                1).expand_as(encoded_hidden_states)], dim=-1)
+            hidden_states = new_hidden_states
+
+        # hidden_states.shape = (lane_num, hidden_size)
+        #                    or (agent_num, hidden_size)
+        hidden_states, _ = torch.max(
+            hidden_states + attention_mask_final, dim=1)
+
+        return hidden_states
+
+class Sub_Graph_Agent(nn.Module):
+    def __init__(self, hidden_size, kernel_size=3, depth=1,drop=0.1):
+        super(Sub_Graph_Agent, self).__init__()
+        """
+            This Sub_Graph corresponds to Polyline Subgraph of VectorNet
+        """
+
+        self.hidden_size = hidden_size
+        self.depth = depth
+
+        # 使用LSTM替代MLP
+        self.lstm = nn.LSTM(hidden_size, hidden_size // 2, num_layers=depth, batch_first=True)
+
+    def forward(self, lane_list):
+        batch_size = len(lane_list)
+        device = lane_list[0].device
+        hidden_states, lengths = merge_tensors(
+            lane_list, device, self.hidden_size)
+        max_vector_num = hidden_states.shape[1]
+
+        attention_mask = torch.zeros(
+            [batch_size, max_vector_num, self.hidden_size//2], device=device)
+        attention_mask_final = torch.zeros(
+            [batch_size, max_vector_num, self.hidden_size], device=device)
+
+        for i in range(batch_size):
+            assert lengths[i] > 0
+            attention_mask[i][lengths[i]:max_vector_num].fill_(-10000.0)
+            attention_mask_final[i][lengths[i]:max_vector_num].fill_(-10000.0)
+
+        zeros = torch.zeros([self.hidden_size//2], device=device)
+
+        lstm_input = hidden_states.view(batch_size, max_vector_num, -1)
+        lstm_output, _ = self.lstm(lstm_input)
+
+        max_hidden, _ = torch.max(lstm_output + attention_mask, dim=1)
+        max_hidden = torch.max(max_hidden, zeros.unsqueeze(0).expand_as(max_hidden))
+
+        new_hidden_states = torch.cat([lstm_output, max_hidden.unsqueeze(1).expand_as(lstm_output)], dim=-1)
+        hidden_states = new_hidden_states
+
+        hidden_states, _ = torch.max(hidden_states + attention_mask_final, dim=1)
+
+        return hidden_states
+
 
 class Trajectory_Decoder(nn.Module):
     def __init__(self, args):
@@ -346,11 +443,9 @@ class TransformerDecoder(nn.Module):
         self.cross_attn = Attention_Block(hidden_size)
 
     def forward(self, x_padding, x_mask, y_padding , y_mask):
-        self_attn_output = self.self_attn(x_padding,x_padding,x_mask)
-
-        cross_attn_output = self.cross_attn(self_attn_output,y_padding,y_mask)
-
-        return cross_attn_output
+        cross_attn_output = self.cross_attn(x_padding,y_padding,y_mask)
+        self_attn_output = self.self_attn(cross_attn_output,cross_attn_output,x_mask)
+        return self_attn_output
 
 class Interaction_Module2(nn.Module):
     def __init__(self, hidden_size, depth=3):
@@ -381,17 +476,19 @@ class Interaction_Module2(nn.Module):
         # === Agent to Lane ===
         for layer_index in range(self.depth):
             # === Lane to Agent ===
-            lane_features = lane_features + self.L2A[layer_index](x_padding=lane_features, x_mask=masks[-2], y_padding=agent_features, y_mask=masks[-1].to(torch.int)&attention_map.transpose(-1, -2).to(torch.int))
+            
             # === ==== ===
 
             # === Agent to Lane ===
             if layer_index!=self.depth-1:
+                lane_features = lane_features + self.L2A[layer_index](x_padding=lane_features, x_mask=masks[-2], y_padding=agent_features, y_mask=masks[-1].to(torch.int)&attention_map.transpose(-1, -2).to(torch.int))
                 agent_features = agent_features + self.A2L[layer_index](x_padding=agent_features, x_mask=masks[-4], y_padding=lane_features, y_mask=masks[-3].to(torch.int)&attention_map.to(torch.int))
             else:
+                lane_features = lane_features + self.L2A[layer_index](x_padding=lane_features, x_mask=masks[-2], y_padding=agent_features, y_mask=masks[-1])
                 agent_features = agent_features + self.A2L[layer_index](x_padding=agent_features, x_mask=masks[-4], y_padding=lane_features, y_mask=masks[-3])
             # === ==== ===
 
-        agent_features=self.AA(agent_features,attn_mask=masks[-4])
+        # agent_features=self.AA(agent_features,attn_mask=masks[-4])
 
         return agent_features, lane_features
 
