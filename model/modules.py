@@ -481,11 +481,11 @@ class Interaction_Module2(nn.Module):
 
             # === Agent to Lane ===
             if layer_index!=self.depth-1:
-                lane_features = lane_features + self.L2A[layer_index](x_padding=lane_features, x_mask=masks[-2], y_padding=agent_features, y_mask=masks[-1].to(torch.int)&attention_map.transpose(-1, -2).to(torch.int))
-                agent_features = agent_features + self.A2L[layer_index](x_padding=agent_features, x_mask=masks[-4], y_padding=lane_features, y_mask=masks[-3].to(torch.int)&attention_map.to(torch.int))
+                lane_features = self.L2A[layer_index](x_padding=lane_features, x_mask=masks[-2], y_padding=agent_features, y_mask=masks[-1])
+                agent_features = self.A2L[layer_index](x_padding=agent_features, x_mask=masks[-4], y_padding=lane_features, y_mask=masks[-3])
             else:
-                lane_features = lane_features + self.L2A[layer_index](x_padding=lane_features, x_mask=masks[-2], y_padding=agent_features, y_mask=masks[-1])
-                agent_features = agent_features + self.A2L[layer_index](x_padding=agent_features, x_mask=masks[-4], y_padding=lane_features, y_mask=masks[-3])
+                lane_features = self.L2A[layer_index](x_padding=lane_features, x_mask=masks[-2], y_padding=agent_features, y_mask=masks[-1].to(torch.int)&attention_map.transpose(-1, -2).to(torch.int))
+                agent_features =  self.A2L[layer_index](x_padding=agent_features, x_mask=masks[-4], y_padding=lane_features, y_mask=masks[-3].to(torch.int)&attention_map.to(torch.int))
             # === ==== ===
 
         # agent_features=self.AA(agent_features,attn_mask=masks[-4])

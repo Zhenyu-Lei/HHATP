@@ -318,7 +318,8 @@ def draw_attention_maps(attention_map, save_dir):
         # 设置坐标轴范围和标题
         plt.xlim(0, K)
         plt.ylim(0, N)
-        plt.title(f'Attention Map {i+1}')
+        plt.axis('off')
+        plt.title(f"agents num:{N}    lanes num:{K}")
 
         # 保存图片
         save_path = os.path.join(save_dir, f'attention_map_{i+1}.png')

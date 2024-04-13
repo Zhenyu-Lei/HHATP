@@ -43,6 +43,7 @@ def validate(args, model, dataloader):
             eval_instance_argoverse(
                 batch_size, pred_trajectory, pred_probs, batch, file2pred, file2labels, file2probs, DEs, iter_bar, step == 0)
             if args.multi_agent:
+                # multi_out并没有制作和文件名的索引，这里直接用batch(mapping)和multi_out绘制即可
                 multi_agent_metrics(multi_out, step == 0, evaluate=False)
                 multi_outputs.extend(multi_out)
 
