@@ -128,7 +128,8 @@ class Argoverse_Dataset(Dataset):
         information_matrix = information_matrix[:, torch.tensor(
             agent_indices, dtype=torch.long)]
 
-        full_traj = torch.mean(information_matrix, dim=0) == 1
+        # full_traj = torch.mean(information_matrix, dim=0) == 1
+        full_traj = torch.mean(information_matrix[:20], dim=0) == 1
         # moving.shape = (#agent_num)
         moving = torch.norm(pos_matrix[19] - pos_matrix[0], dim=-1) > 6.0
         moving[0] = True
@@ -137,11 +138,27 @@ class Argoverse_Dataset(Dataset):
         assert 0 in consider
 
 
+        # new_mapping = {"agent_data": agent_list,
+        #                "lane_data": lane_list,
+        #                "city_name": mapping["city_name"],
+        #                "file_name": mapping["file_name"],
+        #                "origin_labels": mapping["origin_labels"],
+        #                "labels": labels,
+        #                "label_is_valid": label_is_valid,
+        #                "consider": consider,
+        #                "cent_x": mapping["cent_x"],
+        #                "cent_y": mapping["cent_y"],
+        #                "angle": mapping["angle"],
+        #                "attention_map": mapping["attention_map"][~np.array(drop_list)],
+        #                "meta_info": meta_info,
+        #                "pos_matrix": mapping["pos_matrix"]}
+
+
         new_mapping = {"agent_data": agent_list,
                        "lane_data": lane_list,
                        "city_name": mapping["city_name"],
                        "file_name": mapping["file_name"],
-                       "origin_labels": mapping["origin_labels"],
+                    #    "origin_labels": mapping["origin_labels"],
                        "labels": labels,
                        "label_is_valid": label_is_valid,
                        "consider": consider,
@@ -149,7 +166,8 @@ class Argoverse_Dataset(Dataset):
                        "cent_y": mapping["cent_y"],
                        "angle": mapping["angle"],
                        "attention_map": mapping["attention_map"][~np.array(drop_list)],
-                       "meta_info": meta_info}
+                       "meta_info": meta_info,
+                       "pos_matrix": mapping["pos_matrix"]}
 
         return [new_mapping]
 

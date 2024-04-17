@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from utils.utils import plot_attention
 
 
 class Attention(nn.Module):
@@ -31,7 +32,7 @@ class Attention(nn.Module):
         # (batch, head, max_vector_num, head_size)
         return x.permute(0, 2, 1, 3)
 
-    def forward(self, query_states, key_value_states, attention_mask):
+    def forward(self, query_states, key_value_states, attention_mask,mapping=None,layer_index=0):
         mixed_query_layer = self.query(query_states)
         mixed_key_layer = F.linear(key_value_states, self.key.weight)
         mixed_value_layer = self.value(key_value_states)
@@ -48,6 +49,7 @@ class Attention(nn.Module):
 
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
         attention_probs = self.attention_drop(attention_probs)
+        # plot_attention(mapping,layer_index,attention_probs)
 
         assert torch.isnan(attention_probs).sum() == 0
 

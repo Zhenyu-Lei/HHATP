@@ -73,7 +73,7 @@ def get_args():
 
     # === Common Hyperparameters ===
     parser.add_argument('--hidden_size', type=int, default=128)
-    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--epoch', type=int, default=36)
     parser.add_argument('--learning_rate', type=float, default=1e-4)
 

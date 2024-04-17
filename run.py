@@ -12,10 +12,11 @@ from torch.utils.data import DataLoader
 
 from utils.get_model import get_model, save_model
 from dataset.argoverse_dataset import Argoverse_Dataset, batch_list_to_batch_tensors, __iter__
-from utils.utils import fix_seed, setup, save_predictions
+from utils.utils import fix_seed, setup, save_predictions, plot_scene, plot_attention_map, plot_attention_map_agent
 from utils.utils import eval_instance_argoverse, post_eval, multi_agent_metrics
 
 from read_args import get_args
+from argoverse.evaluation import competition_util
 
 
 def validate(args, model, dataloader):
@@ -30,22 +31,39 @@ def validate(args, model, dataloader):
     model.module.inference_time = 0.0
 
     model.eval()
+    final_result=[]
+    file_name=[]
     with torch.no_grad():
         for step, batch in enumerate(iter_bar):
 
-            pred_trajectory, pred_probs, multi_out = model.module(batch, True)
+            pred_trajectory, pred_probs, multi_out, file_names = model.module(batch, True)
             batch_size = pred_trajectory.shape[0]
             for i in range(batch_size):
                 assert pred_trajectory[i].shape == (6, 30, 2)
                 assert pred_probs[i].shape == (6, )
 
             # batch = [scene[0] for scene in batch]
-            eval_instance_argoverse(
-                batch_size, pred_trajectory, pred_probs, batch, file2pred, file2labels, file2probs, DEs, iter_bar, step == 0)
-            if args.multi_agent:
-                # multi_out并没有制作和文件名的索引，这里直接用batch(mapping)和multi_out绘制即可
-                multi_agent_metrics(multi_out, step == 0, evaluate=False)
-                multi_outputs.extend(multi_out)
+            # eval_instance_argoverse(
+            #     batch_size, pred_trajectory, pred_probs, batch, file2pred, file2labels, file2probs, DEs, iter_bar, step == 0)
+            # if args.multi_agent:
+            #     # multi_out并没有制作和文件名的索引，这里直接用batch(mapping)和multi_out绘制即可
+            #     multi_agent_metrics(multi_out, step == 0, evaluate=False)
+            #     multi_outputs.extend(multi_out)
+            #     # for i,_ in enumerate(batch):
+            #     #     plot_scene(batch[i],multi_out[i])
+            #     #     plot_attention_map_agent(batch[i])
+            final_result.append(pred_trajectory)
+            file_name.append(file_names)
+    
+    # === test ===
+    final_result=np.concatenate(final_result)
+    file_name=np.concatenate(file_name)
+    result = {}
+    for i in range(len(final_result)):
+        key = int(file_name[i].split('/')[-1].split('.')[0])
+        result[key] = final_result[i]
+    competition_util.generate_forecasting_h5(result, './submission', 'AELID')
+    # ===========
 
     print(f"\nInference time: {model.module.inference_time / len(dataloader.dataset) * 1000:.2f} ms\n")
     post_eval(file2pred, file2labels, file2probs, DEs)

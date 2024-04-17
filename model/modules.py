@@ -170,12 +170,12 @@ class Attention_Block(nn.Module):
         self.norm1 = nn.LayerNorm(hidden_size)
         self.norm2 = nn.LayerNorm(hidden_size)
 
-    def forward(self, query, key_value=None, attn_mask=None):
+    def forward(self, query, key_value=None, attn_mask=None,mapping=None,layer_index=0):
         if key_value is None:
             key_value = query
 
         attn_output = self.multiheadattention(
-            query, key_value, attention_mask=attn_mask)
+            query, key_value, attention_mask=attn_mask,mapping=mapping,layer_index=layer_index)
 
         query = self.norm1(attn_output + query)
         query_temp = self.ffn_layer(query)
@@ -442,8 +442,8 @@ class TransformerDecoder(nn.Module):
         self.self_attn = Attention_Block(hidden_size)
         self.cross_attn = Attention_Block(hidden_size)
 
-    def forward(self, x_padding, x_mask, y_padding , y_mask):
-        cross_attn_output = self.cross_attn(x_padding,y_padding,y_mask)
+    def forward(self, x_padding, x_mask, y_padding , y_mask,mapping=None,layer_index=0):
+        cross_attn_output = self.cross_attn(x_padding,y_padding,y_mask,mapping,layer_index=layer_index)
         self_attn_output = self.self_attn(cross_attn_output,cross_attn_output,x_mask)
         return self_attn_output
 
@@ -453,13 +453,11 @@ class Interaction_Module2(nn.Module):
 
         self.depth = depth
 
-        self.LL = Attention_Block(hidden_size)
         self.L2A = nn.ModuleList([TransformerDecoder(hidden_size) for _ in range(depth)])
         self.A2L = nn.ModuleList([TransformerDecoder(hidden_size) for _ in range(depth)])
-        self.AA = Attention_Block(hidden_size)
 
 
-    def forward(self, agent_features, lane_features, masks, attention_map):
+    def forward(self, agent_features, lane_features, masks, attention_map,mapping):
 
         # # === Agent to Lane ===
         # for layer_index in range(self.depth):
@@ -482,10 +480,10 @@ class Interaction_Module2(nn.Module):
             # === Agent to Lane ===
             if layer_index!=self.depth-1:
                 lane_features = self.L2A[layer_index](x_padding=lane_features, x_mask=masks[-2], y_padding=agent_features, y_mask=masks[-1])
-                agent_features = self.A2L[layer_index](x_padding=agent_features, x_mask=masks[-4], y_padding=lane_features, y_mask=masks[-3])
+                agent_features = self.A2L[layer_index](x_padding=agent_features, x_mask=masks[-4], y_padding=lane_features, y_mask=masks[-3],mapping=mapping,layer_index=layer_index)
             else:
                 lane_features = self.L2A[layer_index](x_padding=lane_features, x_mask=masks[-2], y_padding=agent_features, y_mask=masks[-1].to(torch.int)&attention_map.transpose(-1, -2).to(torch.int))
-                agent_features =  self.A2L[layer_index](x_padding=agent_features, x_mask=masks[-4], y_padding=lane_features, y_mask=masks[-3].to(torch.int)&attention_map.to(torch.int))
+                agent_features =  self.A2L[layer_index](x_padding=agent_features, x_mask=masks[-4], y_padding=lane_features, y_mask=masks[-3].to(torch.int)&attention_map.to(torch.int),mapping=mapping,layer_index=layer_index)
             # === ==== ===
 
         # agent_features=self.AA(agent_features,attn_mask=masks[-4])

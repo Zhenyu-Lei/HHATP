@@ -63,6 +63,7 @@ class ADAPT(nn.Module):
         meta_info = [mapping[i]["meta_info"] for i in range(batch_size)]
         considers = [mapping[i]["consider"] for i in range(batch_size)]
         attention_map = [mapping[i]["attention_map"] for i in range(batch_size)]
+        file_names=[mapping[i]["file_name"] for i in range(batch_size)]
 
         for i in range(batch_size):
             for j in range(len(agent_data[i])):
@@ -81,7 +82,7 @@ class ADAPT(nn.Module):
         # agent_features.shape = (N, M, D)
         # lane_features.shape = (N, L, D)
         agent_features, lane_features = self.encode_polylines(
-                agent_data, lane_data, attention_map)
+                agent_data, lane_data, attention_map, mapping)
 
         # predictions.shape = (N, M, 6, 30, 2)
         predictions, logits = self.trajectory_decoder(
@@ -153,9 +154,9 @@ class ADAPT(nn.Module):
 
             self.inference_time += (end - start)
 
-            return outputs, metric_probs, multi_outputs
+            return outputs, metric_probs, multi_outputs, file_names
 
-    def encode_polylines(self, agent_data, lane_data, attention_map):
+    def encode_polylines(self, agent_data, lane_data, attention_map, mapping):
         batch_size = len(agent_data)
 
         # === === Polyline Subgraph Part === ===
@@ -186,6 +187,6 @@ class ADAPT(nn.Module):
 
         masks, _ = get_masks(agent_lengths, lane_lengths, self.device)
         # agent_states(N,M,D), lane_states(N,L,D)
-        agent_states, lane_states = self.interaction_module(agent_states, lane_states, masks, attention_map)
+        agent_states, lane_states = self.interaction_module(agent_states, lane_states, masks, attention_map,mapping)
 
         return agent_states, lane_states

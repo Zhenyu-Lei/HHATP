@@ -9,6 +9,8 @@ import pickle
 from tqdm import tqdm
 from datetime import datetime
 from argoverse.evaluation import eval_forecasting
+from argoverse.map_representation.map_api import ArgoverseMap
+import zlib
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import os
@@ -327,3 +329,279 @@ def draw_attention_maps(attention_map, save_dir):
 
         # 关闭图像
         plt.close()
+
+def get_map_and_predictions(file_name_int, ex_list, predictions, file_names_in_ex_list_order=None):
+    if file_names_in_ex_list_order is not None:
+        idx = file_names_in_ex_list_order.index(file_name_int)
+        mapping_i = pickle.loads(zlib.decompress(ex_list[idx]))
+        return mapping_i, predictions[file_name_int]
+    
+    else:
+        for mapping_i_comp in ex_list:
+            mapping_i = pickle.loads(zlib.decompress(mapping_i_comp))
+            if int(mapping_i["file_name"].split("/")[-1][:-4]) == file_name_int:
+                return mapping_i, predictions[file_name_int]
+        assert False, "No scene with given file index"
+
+    
+def rotate(x, y, angle):
+    res_x = x * math.cos(angle) - y * math.sin(angle)
+    res_y = x * math.sin(angle) + y * math.cos(angle)
+    return res_x, res_y
+
+am = ArgoverseMap()
+def get_lanes(mapping):
+    pos_matrix = mapping["pos_matrix"]
+    polygons = []
+    agent_num = pos_matrix.shape[1]
+    
+    x = mapping["cent_x"]
+    y = mapping["cent_y"]
+    city_name = mapping['city_name']
+    
+    for agent_id in range(agent_num):
+        for t_id in range(20):
+            pos_x = pos_matrix[t_id, agent_id, 0]
+            pos_y = pos_matrix[t_id, agent_id, 1]
+
+            bias_x, bias_y = rotate(pos_x, pos_y, -1*mapping["angle"])
+            temp_x, temp_y = (bias_x + x), (bias_y + y)
+            
+            polygons_i = am.find_local_lane_polygons([temp_x - 100, temp_x + 100, temp_y - 100, temp_y + 100], city_name)
+            
+            for polygon_i in polygons_i:
+                # check if polygon is available
+                available = False
+                for available_polygone in polygons:
+                    if np.all(available_polygone == polygon_i[:, :2]):
+                        available = True
+                        break
+                        
+                if available:
+                    continue
+
+                polygons.append(polygon_i[:, :2])
+
+        break
+           
+
+    polygons = [polygon.copy() for polygon in polygons]
+    angle = mapping['angle']
+    for index_polygon, polygon in enumerate(polygons):
+        for i, point in enumerate(polygon):
+            point[0], point[1] = rotate(point[0] - x, point[1] - y, angle)
+
+    polygons = [polygon for polygon in polygons]
+    
+    return polygons
+
+def plot_scene(mapping_i,predictions_i):
+    mapping_i, predictions_i
+    mapping_i = mapping_i.copy()
+    predictions_pred = predictions_i[0]
+    predictions_label = predictions_i[1]
+    
+    lanes = get_lanes(mapping_i)
+    # === Plot Lanes ===
+    for lane in lanes:
+        plt.plot(lane[:, 0], lane[:, 1], c="gray", alpha=0.25)
+        
+    pos_matrix = mapping_i["pos_matrix"]
+    
+    # === Plot Ego Past ===
+    plt.plot(pos_matrix[:20, 0, 0], pos_matrix[:20, 0, 1], c="cyan")
+    
+    # === Plot Other Agents Past ===
+    agent_num = pos_matrix.shape[1] - 1
+    for j in range(agent_num):
+        positions = pos_matrix[:20, j + 1]
+        plt.plot(positions[:, 0], positions[:, 1], c="black")
+        plt.scatter(positions[-1, 0], positions[-1, 1], marker=".", c="black")
+        
+    
+    # === Plot Ego Futures ===
+    angle = mapping_i["angle"]
+    x = mapping_i["cent_x"]
+    y = mapping_i["cent_y"]
+    for predictions_i in predictions_pred:
+        for pred_i_j in predictions_i:
+            
+            # To local coordinate system 
+            # for i, point in enumerate(pred_i_j):
+            #     point[0], point[1] = rotate(point[0], point[1], angle)
+                
+            plt.plot(pred_i_j[:, 0], pred_i_j[:, 1], c="green")
+            plt.scatter(pred_i_j[-1, 0], pred_i_j[-1, 1], marker="*", c="green", edgecolors="black", s=100, zorder=5)
+        
+    # === Plot Ego Future (GT) ===
+    mgt = predictions_label
+    for gt in mgt:
+        # for i, point in enumerate(gt):
+            # point[0], point[1] = rotate(point[0] , point[1], angle)
+        
+        plt.plot(gt[:, 0], gt[:, 1], c="red")
+        plt.scatter(gt[-1, 0], gt[-1, 1], marker="*", c="red", edgecolors="black", s=100, zorder=6)
+    
+    origin_x, origin_y = mgt[0][-1]
+    plt.axis('equal')
+    
+    plt.xlim([origin_x - 30, origin_x + 30])
+    plt.ylim([origin_y - 30, origin_y + 30])
+    plt.axis('off')
+    
+    fig_name=mapping_i["file_name"].split("/")[-1][:-4]
+    plt.savefig(f"exp_pic/{fig_name}_output.png")
+    plt.clf()
+
+
+def plot_attention_map(mapping_i):
+    mapping_i = mapping_i.copy()
+    
+    lanes = get_lanes(mapping_i)
+    # === Plot Lanes ===
+    for lane in lanes:
+        plt.plot(lane[:, 0], lane[:, 1], c="gray", alpha=0.25)
+        
+    pos_matrix = mapping_i["pos_matrix"]
+    
+    # === Plot Ego Past ===
+    plt.plot(pos_matrix[:20, 0, 0], pos_matrix[:20, 0, 1], c="red")
+
+    # === Plot Other Agents Past ===
+    agent_num = pos_matrix.shape[1] - 1
+    for j in range(agent_num):
+        positions = pos_matrix[:20, j + 1]
+        plt.plot(positions[:, 0], positions[:, 1], c="green")
+
+    lane_data=mapping_i["lane_data"]
+    attention_map=mapping_i["attention_map"]
+
+    # === Plot Ego Futures ===
+    angle = mapping_i["angle"]
+    cx = mapping_i["cent_x"]
+    cy = mapping_i["cent_y"]
+
+    # 绘制每个向量
+    for i,vector in enumerate(lane_data):
+        if attention_map[0,i].item()==0:
+            continue
+        x = [vector[0, -2].tolist()]+vector[:, -4].tolist()
+        y = [vector[0, -1].tolist()]+vector[:, -3].tolist()
+        # for i,value in enumerate(zip(x,y)):
+        #     x[i],y[i]=rotate(value[0], value[1], -1*angle)
+        plt.plot(y, x, color='limegreen', alpha=0.25, linewidth=5)
+    
+    plt.axis('equal')
+    
+    plt.xlim([- 400, 400])
+    plt.ylim([- 400, 400])
+    plt.axis('off')
+    
+    fig_name=mapping_i["file_name"].split("/")[-1][:-4]
+    plt.savefig(f"exp_pic/Attention_{fig_name}_output.png")
+    plt.clf()
+
+def plot_attention_map_agent(mapping_i):
+    mapping_i = mapping_i.copy()
+    
+    lanes = get_lanes(mapping_i)
+        
+    pos_matrix = mapping_i["pos_matrix"]
+    agent_data = mapping_i["agent_data"]
+    
+    for a,agent in enumerate(agent_data):
+        # === Plot Lanes ===
+        for lane in lanes:
+            plt.plot(lane[:, 0], lane[:, 1], c="gray", alpha=0.25)
+
+        # === Plot Ego Past ===
+        ax=[agent[0, 2].tolist()]+agent[:,0].tolist()
+        ay=[agent[0, 3].tolist()]+agent[:,1].tolist()
+        plt.plot(ax, ay, c="red")
+
+        lane_data=mapping_i["lane_data"]
+        attention_map=mapping_i["attention_map"]
+
+        # === Plot Ego Futures ===
+        angle = mapping_i["angle"]
+        cx = mapping_i["cent_x"]
+        cy = mapping_i["cent_y"]
+
+        # 绘制每个向量
+        for i,vector in enumerate(lane_data):
+            if attention_map[a,i].item()==0:
+                continue
+            x = [vector[0, -2].tolist()]+vector[:, -4].tolist()
+            y = [vector[0, -1].tolist()]+vector[:, -3].tolist()
+            # for i,value in enumerate(zip(x,y)):
+            #     x[i],y[i]=rotate(value[0], value[1], -1*angle)
+            plt.plot(y, x, color='limegreen', alpha=0.25, linewidth=5)
+        
+        plt.axis('equal')
+        
+        plt.xlim([- 150, 150])
+        plt.ylim([- 150, 150])
+        plt.axis('off')
+        
+        fig_name=mapping_i["file_name"].split("/")[-1][:-4]
+        if not os.path.exists(f"exp_pic/{fig_name}"):
+            os.makedirs(f"exp_pic/{fig_name}")
+        plt.savefig(f"exp_pic/{fig_name}/Attention_{a}_output.png")
+        plt.clf()
+
+def plot_attention(mapping,layer_index,attention_probs):
+    if mapping==None:
+        return
+
+    for i,mapping_i in enumerate(mapping): 
+        # lanes = get_lanes(mapping_i)
+        attention_prob=attention_probs[i]
+            
+        pos_matrix = mapping_i["pos_matrix"]
+        agent_data = mapping_i["agent_data"]
+        
+        agent=agent_data[0]
+
+        lane_data=mapping_i["lane_data"]
+
+        # === Plot Ego Futures ===
+        angle = mapping_i["angle"]
+        cx = mapping_i["cent_x"]
+        cy = mapping_i["cent_y"]
+
+        attention_prob=attention_probs[i]
+        fig_name=mapping_i["file_name"].split("/")[-1][:-4]
+        if not os.path.exists(f"exp_pic/attention_{fig_name}/{layer_index}"):
+            os.makedirs(f"exp_pic/attention_{fig_name}/{layer_index}")
+
+        for n,attention in  enumerate(attention_prob): 
+            # === Plot Lanes ===
+            # for lane in lanes:
+            #     plt.plot(lane[:, 0], lane[:, 1], c="gray", alpha=0.05)
+
+            # === Plot Ego Past ===
+            # ax=[agent[0, 2].tolist()]+agent[:,0].tolist()
+            # ay=[agent[0, 3].tolist()]+agent[:,1].tolist()
+            # plt.plot(ax, ay, c="red")
+
+            # 绘制每个向量
+            for i,vector in enumerate(lane_data):
+                x = [vector[0, -2].tolist()]+vector[:, -4].tolist()
+                y = [vector[0, -1].tolist()]+vector[:, -3].tolist()
+                # for i,value in enumerate(zip(x,y)):
+                #     x[i],y[i]=rotate(value[0], value[1], -1*angle)
+                plt.plot(y, x, color='#006400', alpha=min(1.0,attention[0,i].item()*3))
+                
+            plt.axis('equal')
+                
+            plt.xlim([- 75, 75])
+            plt.ylim([- 75, 75])
+            plt.axis('off')
+        
+        # === Plot Ego Past ===
+        ax=[agent[0, 2].tolist()]+agent[:,0].tolist()
+        ay=[agent[0, 3].tolist()]+agent[:,1].tolist()
+        plt.plot(ax, ay, c="red")
+                
+        plt.savefig(f"exp_pic/attention_{fig_name}/{layer_index}/Attention_output.png")
+        plt.clf()
